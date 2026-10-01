@@ -1,0 +1,223 @@
+rules_version = '2';
+
+/**
+ * BrioKod — Firestore
+ *
+ * Divisão de responsabilidade:
+ *   - O cliente lê e escreve apenas o que é dele.
+ *   - Tudo que afeta pontuação, ranking ou judgment de código é escrito pelo
+ *     backend via Admin SDK, que ignora estas regras. Se o cliente pudesse
+ *     escrever, um aluno poderia se atribuir 999 pontos a si mesmo.
+ *   - Negação por padrão: qualquer caminho não descrito abaixo é proibido.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    /** Campos the client is never allowed to set on its own documents. */
+    function onlySafeProfileFields() {
+      return request.resource.data.keys().hasOnly([
+        'displayName', 'photoURL', 'bio', 'updatedAt', 'createdAt'
+      ]);
+    }
+
+    /**
+     * Respostas do onboarding. O aluno escolhe livremente, mas a regra trava o
+     * formato: um `trackId` que não existe no catálogo deixaria a trilha
+     * quebrada para sempre, já que a conclusão do nível é lida deste documento.
+     */
+    function onlyOnboardingAnswers() {
+      return request.resource.data.keys().hasOnly([
+        'experience', 'goal', 'known', 'weeklyHours', 'trackId', 'updatedAt'
+      ])
+        && request.resource.data.experience is string
+        && request.resource.data.goal is string
+        && request.resource.data.weeklyHours is string
+        && request.resource.data.known is list
+        && request.resource.data.trackId is string
+        && request.resource.data.trackId.size() <= 40
+        && request.resource.data.experience.size() <= 40
+        && request.resource.data.goal.size() <= 40
+        && request.resource.data.weeklyHours.size() <= 40;
+    }
+
+    function onlyEnrollment() {
+      return request.resource.data.keys().hasOnly([
+        'trackId', 'startedAt', 'catalog'
+      ])
+        && request.resource.data.trackId is string
+        && request.resource.data.trackId.size() <= 40;
+    }
+
+    function onlyLevelProgress() {
+      return request.resource.data.keys().hasOnly([
+        'trackId', 'levelId', 'completedLevelIds', 'answers',
+        'startedAt', 'updatedAt'
+      ]);
+    }
+
+    // ---------- Public read-only content ----------
+
+    match /problems/{problemId} {
+      allow read: if true;
+      allow write: if false; // problem bank is published by the backend
+    }
+
+    match /courses/{courseId} {
+      allow read: if true;
+      allow write: if false;
+
+      match /modules/{moduleId} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------- Profiles ----------
+
+    match /users/{uid} {
+      // The leaderboard needs names on the client; everything else is private
+      // until the person opts in.
+      allow read: if isOwner(uid)
+                  || (isSignedIn() && resource.data.isPublic == true)
+                  || isAdmin();
+      allow create: if isOwner(uid) && onlySafeProfileFields();
+      allow update: if isOwner(uid)
+                    && onlySafeProfileFields()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['displayName', 'photoURL', 'bio', 'isPublic', 'updatedAt']);
+      allow delete: if isOwner(uid);
+
+      // Submission history is written by the backend when a verdict is produced.
+      match /submissions/{submissionId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if false;
+      }
+
+      // Onboarding: as respostas e a matrícula na trilha. O cliente escreve
+      // porque é a única fonte disso, e só ele mesmo enxerga.
+      match /onboarding/{docId} {
+        allow read: if isOwner(uid);
+
+        allow create, update: if isOwner(uid)
+                              && (docId == 'profile' && onlyOnboardingAnswers())
+                              || (docId == 'enrollment' && onlyEnrollment());
+
+        allow delete: if isOwner(uid);
+      }
+
+      // Per-module progress: purely the student's own state.
+      match /progress/{moduleId} {
+        // `current` é o estado da trilha ativa e só aceita campos de progresso.
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid)
+                     && (moduleId != 'current' || onlyLevelProgress());
+
+        // Deep-nested free practice, e.g. progress/udemy/lesson-3
+        match /{subdocId} {
+          allow read, write: if isOwner(uid);
+        }
+      }
+
+      match /drafts/{draftId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /settings/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // ---------- Leaderboard ----------
+    // Public read, zero client writes. Only the backend (Admin SDK) publishes
+    // these after a submission is actually accepted.
+
+    match /leaderboard/{uid} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /leaderboardSeasons/{seasonId}/entries/{uid} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ---------- Badges ----------
+    // Earned, never self-assigned.
+
+    match /badges/{badgeId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /users/{uid}/badges/{badgeId} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    // ---------- Moderation queue ----------
+
+    match /reports/{reportId} {
+      allow create: if isSignedIn()
+                    && request.resource.data.keys().hasOnly([
+                         'reporterUid', 'reason', 'targetType', 'targetId', 'createdAt'
+                       ])
+                    && request.resource.data.reporterUid == request.auth.uid;
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- Rooms (Torneios) ----------
+    //
+    // Tudo o que escreve em salas é feito pelo backend com o Admin SDK. O
+    // browser só lê: a pontuação, o código secreto e a lista de exercícios são
+    // decidedos no servidor, e por isso nenhuma regra aqui permite writes.
+
+    match /rooms/{roomId} {
+      // Qualquer usuário autenticado pode ler a sala (o código secreto é o
+      // controle de acesso: sem ele não se descobre o roomId).
+      allow read: if isSignedIn();
+      allow write: if false;
+
+      // Participantes: o ranking precisa de ler todos, por isso a lista é
+      // aberta a qualquer autenticado. Só o backend cria documentos.
+      match /participants/{uid} {
+        allow read: if isSignedIn();
+        allow write: if false;
+      }
+
+      // Submissões: só o dono da sala consulta o histórico.
+      match /submissions/{submissionId} {
+        allow read: if isSignedIn()
+                     && get(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId == request.auth.uid;
+        allow write: if false;
+      }
+    }
+
+    // ---------- Catch-all ----------
+    // Anything not matched above is denied, including reads of private data
+    // under paths that were added without a rule.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

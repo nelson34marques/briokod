@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: briokod-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run api
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_PATH
+        value: /var/data/briokod.db
+      - key: CORS_ORIGIN
+        value: https://briokod.onrender.com
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_JWKS_URL
+        sync: false
+      - key: JUDGE0_AUTH_TOKEN
+        sync: false
+      - key: PISTON_API_KEY
+        sync: false
+      - key: ADMIN_KEY
+        sync: false

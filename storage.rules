@@ -1,0 +1,61 @@
+rules_version = '2';
+
+/**
+ * BrioKod — Cloud Storage
+ *
+ * Só duas coisas legíveis pelo cliente: o avatar do dono e arquivos de
+ * currículo. Todo upload passa por validação de tipo e tamanho, e nada é
+ * público por padrão (o SDK do Firebase ignora regras, mas o console não).
+ */
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function under(limitMb) {
+      return request.resource.size < limitMb * 1024 * 1024;
+    }
+
+    // ---------- Avatars ----------
+    // 5 MB, only images, and the file name must be "<uid>_something.<ext>" so a
+    // user cannot overwrite someone else's picture by guessing a path.
+
+    match /avatars/{uid}/{fileName} {
+      allow read: if true;
+      allow write: if isOwner(uid)
+                   && isImage()
+                   && under(5)
+                   && fileName.matches(uid + '_[A-Za-z0-9_-]+\\.(jpg|jpeg|png|webp|gif)');
+      allow delete: if isOwner(uid);
+    }
+
+    // ---------- Résumé / portfolio PDFs ----------
+
+    match /resumes/{uid}/{fileName} {
+      allow read: if isOwner(uid);
+      allow write: if isOwner(uid)
+                   && request.resource.contentType == 'application/pdf'
+                   && under(10);
+      allow delete: if isOwner(uid);
+    }
+
+    // ---------- Submissions archive ----------
+    // Server-only: the backend uploads run logs and solution snapshots.
+
+    match /submissions/{uid}/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // ---------- Everything else ----------
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
