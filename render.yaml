@@ -2,26 +2,49 @@ services:
   - type: web
     name: briokod-api
     runtime: node
-    plan: free
+    # O plano free adormece (cold start ~50s) e não suporta disco. Para uma
+    # apresentação ao vivo, o starter + disco persistente evita que a API
+    # adormeça a meio e que os dados (ranking, submissões) se percam no deploy.
+    plan: starter
     buildCommand: npm install
     startCommand: npm run api
     healthCheckPath: /api/health
+    disk:
+      name: briokod-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
+      # node:sqlite precisa de Node >= 24 (ver engines no package.json).
+      - key: NODE_VERSION
+        value: 24
       - key: PORT
         value: 3000
+      # Tem de ligar em 0.0.0.0 em produção, senão o proxy do Render não alcança.
+      - key: HOST
+        value: 0.0.0.0
       - key: DATABASE_PATH
         value: /var/data/briokod.db
+      # O domínio do Vercel. Acrescenta previews (*.vercel.app) separados por
+      # vírgula, ou usa "*" para aceitar qualquer origem (não recomendado).
       - key: CORS_ORIGIN
-        value: https://briokod.onrender.com
+        value: https://briokod.vercel.app
+      # Judge0 primeiro (execução real); mock é o último recurso garantido, para
+      # o JS nunca dar 502. Sem judge0 alcançável, só o JS corre.
+      - key: EXECUTORS
+        value: judge0-ce,mock
       - key: FIREBASE_PROJECT_ID
+        value: briokod
+      # Necessário para Salas/Torneios (escrita no Firestore via Admin SDK).
+      # No dashboard: cola o JSON da service account ou o email + chave privada.
+      - key: FIREBASE_ADMIN_CREDENTIALS
         sync: false
-      - key: FIREBASE_JWKS_URL
+      - key: FIREBASE_ADMIN_EMAIL
         sync: false
-      - key: JUDGE0_AUTH_TOKEN
-        sync: false
-      - key: PISTON_API_KEY
+      - key: FIREBASE_ADMIN_PRIVATE_KEY
         sync: false
       - key: ADMIN_KEY
+        sync: false
+      - key: ADMIN_UIDS
         sync: false

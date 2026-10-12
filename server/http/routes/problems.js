@@ -51,7 +51,7 @@ router.get(
   '/problems/:slug/testcases',
   asyncHandler(async (req, res) => {
     const problem = getProblemBySlug(req.params.slug);
-    const includeHidden = req.query.includeHidden === 'true' && Boolean(req.user);
+    const includeHidden = req.query.includeHidden === 'true' && req.user?.isAdmin === true;
     res.json({
       problemId: problem.id,
       slug: problem.slug,

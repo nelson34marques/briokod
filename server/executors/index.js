@@ -58,9 +58,11 @@ export const chain = config.executors.filter((name) => {
   return false;
 });
 
-if (chain.length === 0) {
+// O mock entra sempre como último recurso: garante que o JS corre e que uma
+// linguagem sem executor devolve "indisponível" (200) em vez de um 502.
+if (!chain.includes('mock')) {
   chain.push('mock');
-  logger.warn('no usable executor configured, falling back to mock');
+  logger.warn('mock não está em EXECUTORS, a acrescentar como último recurso');
 }
 
 function breaker(name) {

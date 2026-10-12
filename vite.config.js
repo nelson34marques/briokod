@@ -8,7 +8,9 @@ export default defineConfig({
     // The SPA talks to the Express API on the same origin, so dev needs a proxy.
     proxy: {
       '/api': {
-        target: process.env.API_URL ?? 'http://localhost:3000',
+        // 127.0.0.1 e não "localhost": a API liga em IPv4 e o Node pode
+        // resolver "localhost" para ::1, o que viraria um 502 no proxy.
+        target: process.env.API_URL ?? 'http://127.0.0.1:3000',
         changeOrigin: true,
       },
     },
