@@ -2,17 +2,18 @@ services:
   - type: web
     name: briokod-api
     runtime: node
-    # O plano free adormece (cold start ~50s) e não suporta disco. Para uma
-    # apresentação ao vivo, o starter + disco persistente evita que a API
-    # adormeça a meio e que os dados (ranking, submissões) se percam no deploy.
-    plan: starter
+    # Plano free: adormece após ~15 min sem tráfego (o 1.º pedido demora a
+    # acordar) e o sistema de ficheiros é efémero — a base SQLite reinicia a
+    # cada deploy. Para persistir dados, muda para `starter` + o `disk` abaixo.
+    plan: free
     buildCommand: npm install
     startCommand: npm run api
     healthCheckPath: /api/health
-    disk:
-      name: briokod-data
-      mountPath: /var/data
-      sizeGB: 1
+    # Só no plano pago (o free não suporta discos). Descomenta ao subir de plano:
+    # disk:
+    #   name: briokod-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -24,8 +25,10 @@ services:
       # Tem de ligar em 0.0.0.0 em produção, senão o proxy do Render não alcança.
       - key: HOST
         value: 0.0.0.0
+      # Relativo à raiz do projeto (escrevível no free). Se subires de plano,
+      # muda para /var/data/briokod.db para guardar no disco persistente.
       - key: DATABASE_PATH
-        value: /var/data/briokod.db
+        value: data/briokod.db
       # O domínio do Vercel. Acrescenta previews (*.vercel.app) separados por
       # vírgula, ou usa "*" para aceitar qualquer origem (não recomendado).
       - key: CORS_ORIGIN
@@ -37,7 +40,8 @@ services:
       - key: FIREBASE_PROJECT_ID
         value: briokod
       # Necessário para Salas/Torneios (escrita no Firestore via Admin SDK).
-      # No dashboard: cola o JSON da service account ou o email + chave privada.
+      # Usa um Secret File em /etc/secrets/service-account.json, ou o caminho
+      # para esse ficheiro. Sem isto, Salas/Torneios devolvem 400.
       - key: FIREBASE_ADMIN_CREDENTIALS
         sync: false
       - key: FIREBASE_ADMIN_EMAIL
